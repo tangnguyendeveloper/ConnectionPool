@@ -34,6 +34,8 @@ type ConnectionPool struct {
 	mux    sync.Mutex
 	config *Config
 
+	ctx context.Context
+
 	closed bool
 
 	idleResource   *queue.Queue
@@ -65,12 +67,22 @@ func (p *ConnectionPool) NumActiveResource() uint64 {
 }
 
 // Startup the ConnectionPool
-func (p *ConnectionPool) Start(ctx context.Context) {
+func (p *ConnectionPool) Start(ctx context.Context) error {
+
+	p.ctx = ctx
 
 	for !p.closed {
 
+		select {
+		case <-p.ctx.Done():
+			p.closed = true
+			p.reset()
+			return p.ctx.Err()
+		default:
+		}
+
 		if p.config.MinIdleResource > p.NumResource() {
-			p.initConnection(ctx, p.config.MinIdleResource-p.NumResource())
+			p.initConnection(p.config.MinIdleResource - p.NumResource())
 		}
 
 		if p.config.MinIdleResource < p.NumIdleResource() {
@@ -81,11 +93,13 @@ func (p *ConnectionPool) Start(ctx context.Context) {
 
 		time.Sleep(time.Second * time.Duration(p.config.ReconnectInterval))
 	}
+
+	return nil
 }
 
-func (p *ConnectionPool) initConnection(ctx context.Context, num_connection uint64) {
+func (p *ConnectionPool) initConnection(num_connection uint64) {
 	for num_connection > 0 {
-		p.newIdle(ctx)
+		p.newIdle()
 		num_connection--
 	}
 }
@@ -153,9 +167,9 @@ func (p *ConnectionPool) cleanupIdle() {
 	p.mux.Unlock()
 }
 
-func (p *ConnectionPool) newIdle(ctx context.Context) error {
+func (p *ConnectionPool) newIdle() error {
 
-	resource_value, err := p.config.Constructor(ctx)
+	resource_value, err := p.config.Constructor(p.ctx)
 	if err != nil {
 		return err
 	}
@@ -173,10 +187,18 @@ func (p *ConnectionPool) newIdle(ctx context.Context) error {
 	return nil
 }
 
-func (p *ConnectionPool) Acquire(ctx context.Context) (interface{}, error) {
+func (p *ConnectionPool) Acquire() (*Resource, error) {
 
 	if p.closed {
 		return nil, fmt.Errorf("ERROR: The ConnectionPool was closed")
+	}
+
+	select {
+	case <-p.ctx.Done():
+		p.closed = true
+		p.reset()
+		return nil, p.ctx.Err()
+	default:
 	}
 
 	p.mux.Lock()
@@ -193,7 +215,7 @@ func (p *ConnectionPool) Acquire(ctx context.Context) (interface{}, error) {
 		return nil, fmt.Errorf("ERROR: ConnectionPool Overflow, max_size = %d", p.config.MaxResource)
 	}
 
-	resource_value, err := p.config.Constructor(ctx)
+	resource_value, err := p.config.Constructor(p.ctx)
 	if err != nil {
 		p.mux.Unlock()
 		return nil, err
@@ -219,6 +241,7 @@ func (p *ConnectionPool) removeFromActiveResourceWithID(id uint64) bool {
 }
 
 func (p *ConnectionPool) Release(resource *Resource) {
+
 	ok := p.removeFromActiveResourceWithID(resource.Id())
 	if !ok {
 		return
