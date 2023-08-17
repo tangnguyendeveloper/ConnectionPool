@@ -17,9 +17,9 @@ type Config struct {
 	MinIdleResource uint64
 
 	// Function to Open connection
-	Constructor func(context.Context) (interface{}, error)
+	Constructor func(context.Context) (net.Conn, error)
 	// Function to Close connection
-	Destructor func(value interface{})
+	Destructor func(value net.Conn)
 
 	// Time interval to reconnect if the connection of the pool are lost
 	// (in seconds)
@@ -116,11 +116,11 @@ func (p *ConnectionPool) cleanupLost() {
 
 func (p *ConnectionPool) reset() {
 	for resource := p.idleResource.Dequeue(); resource != nil; resource = p.idleResource.Dequeue() {
-		p.config.Destructor(resource.(*Resource).Value())
+		p.config.Destructor(resource.(*Resource).Value().(net.Conn))
 	}
 
 	for _, resource := range p.activeResource {
-		p.config.Destructor(resource.Value())
+		p.config.Destructor(resource.Value().(net.Conn))
 	}
 
 	p.activeResource = p.activeResource[:0]
@@ -138,7 +138,7 @@ func (p *ConnectionPool) cleanupIdle() {
 		resource := p.idleResource.Peek(n - 1).(*Resource)
 
 		if time.Since(resource.LastUse).Seconds() > p.config.IdleKeepAlive {
-			p.config.Destructor(resource.Value())
+			p.config.Destructor(resource.Value().(net.Conn))
 
 			p.idleResource.Remove(n - 1)
 
@@ -231,7 +231,7 @@ func (p *ConnectionPool) Release(resource *Resource) {
 
 	err := p.idleResource.Enqueue(resource)
 	if err != nil {
-		p.config.Destructor(resource.Value())
+		p.config.Destructor(resource.Value().(net.Conn))
 	}
 }
 
@@ -240,7 +240,7 @@ func (p *ConnectionPool) Destroy(resource *Resource) {
 	if !ok {
 		return
 	}
-	p.config.Destructor(resource.Value())
+	p.config.Destructor(resource.Value().(net.Conn))
 }
 
 func (p *ConnectionPool) Close() {
