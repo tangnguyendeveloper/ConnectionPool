@@ -70,7 +70,7 @@ func (p *ConnectionPool) Start(ctx context.Context) {
 	for !p.closed {
 
 		if p.config.MinIdleResource > p.NumResource() {
-			p.newIdle(ctx)
+			p.initConnection(ctx, p.config.MinIdleResource-p.NumResource())
 		}
 
 		if p.config.MinIdleResource < p.NumIdleResource() {
@@ -80,6 +80,13 @@ func (p *ConnectionPool) Start(ctx context.Context) {
 		p.cleanupLost()
 
 		time.Sleep(time.Second * time.Duration(p.config.ReconnectInterval))
+	}
+}
+
+func (p *ConnectionPool) initConnection(ctx context.Context, num_connection uint64) {
+	for num_connection > 0 {
+		p.newIdle(ctx)
+		num_connection--
 	}
 }
 
