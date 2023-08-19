@@ -47,7 +47,7 @@ func NewConnectionPool(config *Config) *ConnectionPool {
 	return &ConnectionPool{
 		config:       config,
 		idleResource: &queue.Queue{MaxSize: config.MaxResource},
-		closed:       false,
+		closed:       true,
 	}
 }
 
@@ -66,10 +66,13 @@ func (p *ConnectionPool) NumActiveResource() uint64 {
 	return uint64(len(p.activeResource))
 }
 
-// Startup the ConnectionPool
+// Startup the ConnectionPool.
+// Please call with a Goroutine
 func (p *ConnectionPool) Start(ctx context.Context) error {
 
 	p.ctx = ctx
+
+	p.closed = false
 
 	for !p.closed {
 
@@ -187,19 +190,38 @@ func (p *ConnectionPool) newIdle() error {
 	return nil
 }
 
-func (p *ConnectionPool) Acquire() (*Resource, error) {
-
+func (p *ConnectionPool) Acquire(ctx context.Context) (*Resource, error) {
 	if p.closed {
 		return nil, fmt.Errorf("ERROR: The ConnectionPool was closed")
 	}
 
-	select {
-	case <-p.ctx.Done():
-		p.closed = true
-		p.reset()
-		return nil, p.ctx.Err()
-	default:
+	var resource *Resource
+	var err error
+
+	for !p.closed {
+		select {
+		case <-p.ctx.Done():
+			p.closed = true
+			p.reset()
+			return nil, p.ctx.Err()
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
+		resource, err = p.acquire()
+		if err != nil && p.NumResource() == p.config.MaxResource {
+			time.Sleep(time.Millisecond)
+			continue
+		} else {
+			break
+		}
 	}
+
+	return resource, err
+}
+
+func (p *ConnectionPool) acquire() (*Resource, error) {
 
 	p.mux.Lock()
 	resource := p.idleResource.Dequeue().(*Resource)
@@ -210,7 +232,7 @@ func (p *ConnectionPool) Acquire() (*Resource, error) {
 		return resource, nil
 	}
 
-	if p.NumResource()+1 > p.config.MaxResource {
+	if p.NumResource() == p.config.MaxResource {
 		p.mux.Unlock()
 		return nil, fmt.Errorf("ERROR: ConnectionPool Overflow, max_size = %d", p.config.MaxResource)
 	}
@@ -274,4 +296,71 @@ func (p *ConnectionPool) Close() {
 	p.closed = true
 
 	p.reset()
+}
+
+// Recommend to call with a Goroutine
+func (p *ConnectionPool) SendSingle(payload []byte) error {
+	if p.closed {
+		return fmt.Errorf("ERROR: the ConnectionPool is not being startup or closed")
+	}
+
+	select {
+	case <-p.ctx.Done():
+		p.closed = true
+		p.reset()
+		return p.ctx.Err()
+	default:
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+
+	resource, err := p.Acquire(ctx)
+	if err != nil {
+		cancel()
+		return err
+	}
+
+	_, err = resource.Value().(*net.TCPConn).Write(payload)
+	if err != nil {
+		resource.Destroy()
+	} else {
+		resource.Release()
+	}
+
+	cancel()
+	return err
+}
+
+func (p *ConnectionPool) SendMulti(payloads [][]byte) error {
+	if p.closed {
+		return fmt.Errorf("ERROR: the ConnectionPool is not being startup or closed")
+	}
+
+	select {
+	case <-p.ctx.Done():
+		p.closed = true
+		p.reset()
+		return p.ctx.Err()
+	default:
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+
+	resource, err := p.Acquire(ctx)
+	if err != nil {
+		cancel()
+		return err
+	}
+
+	for _, payload := range payloads {
+		_, err = resource.Value().(*net.TCPConn).Write(payload)
+		if err != nil {
+			resource.Destroy()
+		} else {
+			resource.Release()
+		}
+	}
+
+	cancel()
+	return err
 }
