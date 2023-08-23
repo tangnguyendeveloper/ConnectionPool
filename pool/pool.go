@@ -205,7 +205,7 @@ func (p *ConnectionPool) Acquire(ctx context.Context) (*Resource, error) {
 	}
 
 	var resource *Resource
-	var err bool
+	var ok bool
 
 	for !p.closed {
 		select {
@@ -218,8 +218,8 @@ func (p *ConnectionPool) Acquire(ctx context.Context) (*Resource, error) {
 		default:
 		}
 
-		resource, err = p.acquire()
-		if err {
+		resource, ok = p.acquire()
+		if !ok {
 			time.Sleep(time.Millisecond)
 			continue
 		} else {
