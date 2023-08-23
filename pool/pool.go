@@ -228,12 +228,12 @@ func (p *ConnectionPool) Acquire(ctx context.Context) (*Resource, error) {
 func (p *ConnectionPool) acquire() (*Resource, error) {
 
 	p.mux.Lock()
-	resource := p.idleResource.Dequeue().(*Resource)
+	resource := p.idleResource.Dequeue()
 	if resource != nil {
-		resource.Value().(*net.TCPConn).SetDeadline(time.Time{})
-		p.activeResource = append(p.activeResource, resource)
+		resource.(*Resource).Value().(*net.TCPConn).SetDeadline(time.Time{})
+		p.activeResource = append(p.activeResource, resource.(*Resource))
 		p.mux.Unlock()
-		return resource, nil
+		return resource.(*Resource), nil
 	}
 
 	if p.NumResource() == p.config.MaxResource {
@@ -248,10 +248,10 @@ func (p *ConnectionPool) acquire() (*Resource, error) {
 	}
 
 	resource = NewResource(resource_value, p, p.NumResource())
-	p.activeResource = append(p.activeResource, resource)
+	p.activeResource = append(p.activeResource, resource.(*Resource))
 	p.mux.Unlock()
 
-	return resource, nil
+	return resource.(*Resource), nil
 }
 
 func (p *ConnectionPool) removeFromActiveResourceWithID(id uint64) bool {
