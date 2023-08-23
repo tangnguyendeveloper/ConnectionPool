@@ -192,7 +192,7 @@ func (p *ConnectionPool) newIdle() error {
 
 func (p *ConnectionPool) Acquire(ctx context.Context) (*Resource, error) {
 	if p.closed {
-		return nil, fmt.Errorf("ERROR: The ConnectionPool was closed")
+		return nil, fmt.Errorf("Acquire ERROR: The ConnectionPool was closed")
 	}
 
 	var resource *Resource
@@ -234,7 +234,7 @@ func (p *ConnectionPool) acquire() (*Resource, error) {
 
 	if p.NumResource() == p.config.MaxResource {
 		p.mux.Unlock()
-		return nil, fmt.Errorf("ERROR: ConnectionPool Overflow, max_size = %d", p.config.MaxResource)
+		return nil, fmt.Errorf("Acquire ERROR: ConnectionPool Overflow, max_size = %d", p.config.MaxResource)
 	}
 
 	resource_value, err := p.config.Constructor(p.ctx)
@@ -298,10 +298,9 @@ func (p *ConnectionPool) Close() {
 	p.reset()
 }
 
-// Recommend to call with a Goroutine
 func (p *ConnectionPool) SendSingle(payload []byte) error {
 	if p.closed {
-		return fmt.Errorf("ERROR: the ConnectionPool is not being startup or closed")
+		return fmt.Errorf("SendSingle ERROR: the ConnectionPool is not being startup or closed")
 	}
 
 	select {
@@ -331,9 +330,44 @@ func (p *ConnectionPool) SendSingle(payload []byte) error {
 	return err
 }
 
-func (p *ConnectionPool) SendMulti(payloads [][]byte) error {
+// Send request and return the Resource connection to receive response.
+//
+//	the Resource connection must be release.
+func (p *ConnectionPool) SendRequest(request []byte) (*Resource, error) {
 	if p.closed {
-		return fmt.Errorf("ERROR: the ConnectionPool is not being startup or closed")
+		return nil, fmt.Errorf("SendRequest ERROR: the ConnectionPool is not being startup or closed")
+	}
+
+	select {
+	case <-p.ctx.Done():
+		p.closed = true
+		p.reset()
+		return nil, p.ctx.Err()
+	default:
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+
+	resource, err := p.Acquire(ctx)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+
+	_, err = resource.Value().(*net.TCPConn).Write(request)
+	if err != nil {
+		resource.Destroy()
+		cancel()
+		return nil, err
+	}
+
+	cancel()
+	return resource, err
+}
+
+func (p *ConnectionPool) SendMultiple(payloads [][]byte) error {
+	if p.closed {
+		return fmt.Errorf("SendMultiple ERROR: the ConnectionPool is not being startup or closed")
 	}
 
 	select {
