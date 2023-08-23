@@ -66,6 +66,10 @@ func (p *ConnectionPool) NumActiveResource() uint64 {
 	return uint64(len(p.activeResource))
 }
 
+func (p *ConnectionPool) Config() *Config {
+	return p.config
+}
+
 // Startup the ConnectionPool.
 // Please call with a Goroutine
 func (p *ConnectionPool) Start(ctx context.Context) error {
