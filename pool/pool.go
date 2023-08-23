@@ -205,7 +205,7 @@ func (p *ConnectionPool) Acquire(ctx context.Context) (*Resource, error) {
 	}
 
 	var resource *Resource
-	var err error
+	var err bool
 
 	for !p.closed {
 		select {
@@ -219,7 +219,7 @@ func (p *ConnectionPool) Acquire(ctx context.Context) (*Resource, error) {
 		}
 
 		resource, err = p.acquire()
-		if err != nil && p.NumResource() == p.config.MaxResource {
+		if err {
 			time.Sleep(time.Millisecond)
 			continue
 		} else {
@@ -227,10 +227,10 @@ func (p *ConnectionPool) Acquire(ctx context.Context) (*Resource, error) {
 		}
 	}
 
-	return resource, err
+	return resource, nil
 }
 
-func (p *ConnectionPool) acquire() (*Resource, error) {
+func (p *ConnectionPool) acquire() (*Resource, bool) {
 
 	p.mux.Lock()
 	resource := p.idleResource.Dequeue()
@@ -238,25 +238,25 @@ func (p *ConnectionPool) acquire() (*Resource, error) {
 		resource.(*Resource).Value().(*net.TCPConn).SetDeadline(time.Time{})
 		p.activeResource = append(p.activeResource, resource.(*Resource))
 		p.mux.Unlock()
-		return resource.(*Resource), nil
+		return resource.(*Resource), true
 	}
 
 	if p.NumResource() == p.config.MaxResource {
 		p.mux.Unlock()
-		return nil, fmt.Errorf("Acquire ERROR: ConnectionPool Overflow, max_size = %d", p.config.MaxResource)
+		return nil, false
 	}
 
 	resource_value, err := p.config.Constructor(p.ctx)
 	if err != nil {
 		p.mux.Unlock()
-		return nil, err
+		return nil, false
 	}
 
 	resource = NewResource(resource_value, p, p.NumResource())
 	p.activeResource = append(p.activeResource, resource.(*Resource))
 	p.mux.Unlock()
 
-	return resource.(*Resource), nil
+	return resource.(*Resource), true
 }
 
 func (p *ConnectionPool) removeFromActiveResourceWithID(id uint64) bool {
