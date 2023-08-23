@@ -114,6 +114,11 @@ func (p *ConnectionPool) initConnection(num_connection uint64) {
 func (p *ConnectionPool) cleanupLost() {
 	p.mux.Lock()
 
+	if p.idleResource.Peek(0) == nil {
+		p.mux.Unlock()
+		return
+	}
+
 	one := make([]byte, 1)
 
 	resource := p.idleResource.Peek(0).(*Resource)
