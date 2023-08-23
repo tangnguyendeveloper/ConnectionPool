@@ -260,14 +260,17 @@ func (p *ConnectionPool) acquire() (*Resource, error) {
 }
 
 func (p *ConnectionPool) removeFromActiveResourceWithID(id uint64) bool {
+	p.mux.Lock()
+
 	for idx, resource := range p.activeResource {
 		if resource.Id() == id {
-			p.mux.Lock()
 			p.activeResource = append(p.activeResource[:idx], p.activeResource[idx+1:]...)
 			p.mux.Unlock()
 			return true
 		}
 	}
+
+	p.mux.Unlock()
 	return false
 }
 
