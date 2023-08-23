@@ -89,7 +89,9 @@ func (p *ConnectionPool) Start(ctx context.Context) error {
 		}
 
 		if p.config.MinIdleResource > p.NumResource() {
+			p.mux.Lock()
 			p.initConnection(p.config.MinIdleResource - p.NumResource())
+			p.mux.Unlock()
 		}
 
 		if p.config.MinIdleResource < p.NumIdleResource() {
@@ -189,9 +191,7 @@ func (p *ConnectionPool) newIdle() error {
 	resource := NewResource(resource_value, p, p.NumResource())
 	resource.LastUse = time.Now()
 
-	p.mux.Lock()
 	err = p.idleResource.Enqueue(resource)
-	p.mux.Unlock()
 
 	if err != nil {
 		return err
@@ -241,7 +241,7 @@ func (p *ConnectionPool) acquire() (*Resource, bool) {
 		return resource.(*Resource), true
 	}
 
-	if p.NumResource() == p.config.MaxResource {
+	if p.NumResource() >= p.config.MaxResource {
 		p.mux.Unlock()
 		return nil, false
 	}
@@ -260,44 +260,44 @@ func (p *ConnectionPool) acquire() (*Resource, bool) {
 }
 
 func (p *ConnectionPool) removeFromActiveResourceWithID(id uint64) bool {
-	p.mux.Lock()
 
 	for idx, resource := range p.activeResource {
 		if resource.Id() == id {
 			p.activeResource = append(p.activeResource[:idx], p.activeResource[idx+1:]...)
-			p.mux.Unlock()
 			return true
 		}
 	}
 
-	p.mux.Unlock()
 	return false
 }
 
 func (p *ConnectionPool) Release(resource *Resource) {
+	p.mux.Lock()
 
 	ok := p.removeFromActiveResourceWithID(resource.Id())
 	if !ok {
+		p.mux.Unlock()
 		return
 	}
 
 	resource.LastUse = time.Now()
 
-	p.mux.Lock()
-	defer p.mux.Unlock()
-
 	err := p.idleResource.Enqueue(resource)
 	if err != nil {
 		p.config.Destructor(resource.Value().(net.Conn))
 	}
+	p.mux.Unlock()
 }
 
 func (p *ConnectionPool) Destroy(resource *Resource) {
+	p.mux.Lock()
 	ok := p.removeFromActiveResourceWithID(resource.Id())
 	if !ok {
+		p.mux.Unlock()
 		return
 	}
 	p.config.Destructor(resource.Value().(net.Conn))
+	p.mux.Unlock()
 }
 
 func (p *ConnectionPool) Close() {
