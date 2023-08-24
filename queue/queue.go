@@ -39,7 +39,7 @@ func (q Queue) Peek(index uint64) interface{} {
 	return q.elements[index]
 }
 
-func (q Queue) Remove(index uint64) error {
+func (q *Queue) Remove(index uint64) error {
 	if q.IsEmpty() || index > (uint64(q.Length()-1)) {
 		return fmt.Errorf("ERROR: out of size or Queue is empty")
 	}
